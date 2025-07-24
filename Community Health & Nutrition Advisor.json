@@ -1,0 +1,383 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Corrected paths for incoming Telegram webhook payload.\n// The data is nested under \"message\" object.\n\n// Get the message text from Telegram\nconst incomingSms = items[0].json.message.text; // Path for the user's message text\n\n// Get the sender's Chat ID from Telegram. This is the most reliable identifier for replies.\nconst senderPhoneNumber = items[0].json.message.chat.id; // Path for the sender's chat ID\n\n\n// Start with the critical disclaimer and instructions for Gemini\nlet geminiPrompt = `Disclaimer: I am an AI assistant and not a medical professional. For any health concerns, please consult a qualified doctor.\n\nYou are a Community Health and Nutrition Advisor for people in rural India. Your goal is to provide general, helpful, and non-diagnostic advice on health and nutrition, and suggest simple, localized recipe ideas using common Indian ingredients, especially focusing on seasonal vegetables/grains (e.g., based on regional Indian cuisine).\n\n**Important Guidelines:**\n- Always start your response by repeating the Disclaimer: \"I am an AI assistant and not a medical professional. For any health concerns, please consult a qualified doctor.\"\n- If the user explicitly asks for medical diagnosis, treatment, or specific medication, politely refuse and strongly advise them to consult a qualified doctor immediately.\n- If the query implies a serious medical emergency (e.g., \"chest pain,\" \"severe fever for days,\" \"difficulty breathing,\" \"sudden loss of consciousness,\" \"unbearable pain,\" \"fits,\" \"signs of stroke/heart attack\"), then in addition to the standard disclaimer, add a clear and prominent message like: \"This sounds like a serious concern. Please seek immediate medical attention from your nearest doctor, health clinic, or emergency services (dial 108 for ambulance in India) right away.\"\n- Keep language simple and easy to understand, suitable for a general audience.\n- If it's a very generic greeting (e.g., \"Hi,\" \"Hello\"), respond with a friendly greeting and ask how you can help with health or nutrition.\n- If the user asks for something completely out of scope (e.g., political advice, financial advice, complex tech support), politely state you can only assist with health and nutrition related queries.\n\nUser's query: \"${incomingSms}\"\n\nPlease provide your advice or recipe suggestion based on the query. If it's a recipe request, make it suitable for a rural Indian context, suggesting locally available ingredients.\n`;\n\n// Return the prepared data for the next nodes in the workflow\n// The output structure (userQuery, sender, geminiPrompt) remains the same.\nreturn [{\n    json: {\n        userQuery: incomingSms,\n        sender: senderPhoneNumber, // This will now contain the Telegram chat ID\n        geminiPrompt: geminiPrompt\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        0
+      ],
+      "id": "968608e8-1b15-4dbf-a0ce-460411e46afa",
+      "name": "prompt for gemini"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=AIzaSyB6EX2Q9t010sgKHxnkoJDtbHJm58exrBY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "= {\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\":  {{ JSON.stringify($json.geminiPrompt) }}\n        }\n       \n      ]\n    }\n  ]\n}\n\n",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -432,
+        0
+      ],
+      "id": "17ddabdd-26b3-48e7-8154-9f514e1ee4f3",
+      "name": "HTTP Request",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// This script runs in an n8n \"Code\" node.\n// It merges and processes data from two input streams:\n// 1. The output from a Gemini node.\n// 2. Information about the original sender and their query.\n\n// --- Step 1: Validate and reference inputs ---\n// It's assumed a \"Merge\" node is used before this node,\n// with the Gemini output as the first input and sender info as the second.\nconst geminiInput = items[0]?.json || {};\nconst senderInput = items[1]?.json || {};\n\n// --- Step 2: Extract the text response from the Gemini node ---\n// Safely access the nested text property using optional chaining.\nlet geminiRawResponse = 'No response from Gemini API';\nif (geminiInput.candidates?.[0]?.content?.parts?.[0]?.text) {\n  geminiRawResponse = geminiInput.candidates[0].content.parts[0].text;\n}\n\n// --- Step 3: Extract original query and sender information ---\n// The user's original message/query. Fallback to 'N/A'.\nconst userQuery = senderInput.originalQuery || 'N/A';\nlet senderPhoneNumber = $('sender id').first().json.senderId\n\n// Extract sender phone number.\n// First, check the structure seen in the screenshot: `contents[0].parts[0].text`.\nconst senderText = senderInput.contents?.[0]?.parts?.[0]?.text;\nif (senderText && typeof senderText === 'string' && senderText.includes('Sender:')) {\n  // If the text exists and contains \"Sender:\", parse it to get the number.\n  senderPhoneNumber = senderText.split('Sender:')[1]?.trim() || 'unknown';\n} else if (senderInput.originalSender) {\n  // As a fallback, use the original field from your initial code.\n  senderPhoneNumber = senderInput.originalSender;\n}\n\n// --- Step 4: Implement flagging logic based on keywords ---\n// Define keywords that indicate a need for manual review.\nconst seriousKeywords = [\n  \"immediate medical attention\",\n  \"emergency services\",\n  \"dial 108\",\n  \"doctor immediately\",\n  \"seek medical help\",\n  \"urgent care\"\n];\n\n// Check if the Gemini response contains any of the serious keywords.\n// The search is case-insensitive.\nconst flagForReview = seriousKeywords.some(keyword =>\n  geminiRawResponse.toLowerCase().includes(keyword)\n);\n\n// --- Step 5: Construct the final output object ---\n// This will be the output of the n8n node.\nreturn [{\n  json: {\n    userQuery,\n    sender: senderPhoneNumber,\n    geminiResponse: geminiRawResponse,\n    // You can add more logic here to modify the response before sending.\n    // For now, it's the same as the raw Gemini response.\n    finalResponseToSend: geminiRawResponse,\n    flagForReview,\n    timestamp: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -112,
+        -224
+      ],
+      "id": "1f34328d-4ac8-4c3a-92df-c6cb81672c1c",
+      "name": "flag mechanisms"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBWIhk--W8Yy3HKivXXGXwvSN-Jb-rq2UO69GXb3Bdw",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "0",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "geminiResponse": "={{ $json.geminiResponse }}",
+            "finalResponseToSend": "={{ $json.finalResponseToSend }}",
+            "flagForReview": "={{ $json.flagForReview }}",
+            "timestamp": "={{ $json.timestamp }}",
+            "sender": "={{ $json.sender }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "geminiResponse",
+              "displayName": "geminiResponse",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "finalResponseToSend",
+              "displayName": "finalResponseToSend",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "flagForReview",
+              "displayName": "flagForReview",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sender",
+              "displayName": "sender",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        176,
+        16
+      ],
+      "id": "de367ea4-2051-4361-8faf-807ab1912322",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SIFgdcsCMfMba0Cj",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "21370a09-d0db-4465-8b79-8f637ca9ee32",
+              "name": "geminiResponse",
+              "value": "={{ $json.geminiResponse }}",
+              "type": "string"
+            },
+            {
+              "id": "caf0e661-cb3d-4425-8fcf-5f1dbac3609a",
+              "name": "finalResponseToSend",
+              "value": "={{ $json.finalResponseToSend }}",
+              "type": "string"
+            },
+            {
+              "id": "ecf8dcb8-c62c-403b-bd52-f9bde792a380",
+              "name": "flagForReview",
+              "value": "={{ $json.flagForReview }}",
+              "type": "string"
+            },
+            {
+              "id": "70256465-c9ea-4db5-a731-b83bcdc890a7",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "fa8741d4-c135-40b2-abda-3447e4742f06",
+              "name": "sender",
+              "value": "={{ $json.sender }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        80
+      ],
+      "id": "2444c5ff-1c10-496e-afd1-d458ce3820f1",
+      "name": "prepare data for sheets"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -240,
+        144
+      ],
+      "id": "eeb28aa6-c743-4c20-af30-9c7979c8181b",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -752,
+        0
+      ],
+      "id": "f31cc25f-3d46-4593-b1b3-48befe10d59d",
+      "name": "Telegram Trigger",
+      "webhookId": "f5a1d2c0-d502-4e19-adac-6e595fa38a49",
+      "credentials": {
+        "telegramApi": {
+          "id": "8YkI6lYfZ2Bh6M4h",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.sender }}",
+        "text": "={{ $json.finalResponseToSend }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        352,
+        16
+      ],
+      "id": "77b98be7-1a7a-452a-b997-9df06e1e2d48",
+      "name": "Send a text message",
+      "webhookId": "a23e450f-9f6c-4e00-863f-6038595d1b24",
+      "credentials": {
+        "telegramApi": {
+          "id": "8YkI6lYfZ2Bh6M4h",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// This node receives input from the 'prompt for gemini' node.\n// Its purpose is to explicitly extract and return ONLY the sender ID.\n\n// Extract the sender ID from the input of this node.\n// The input format is from the 'prompt for gemini' node's output: { userQuery, sender, geminiPrompt }\nconst senderId = items[0].json.sender; // Access the 'sender' property from the input\n\n// Return an object containing only the sender ID.\n// This will be Input 2 to your Merge node.\nreturn [{\n    json: {\n        senderId: senderId // Returning it as 'senderId' for clarity in the merge\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        192
+      ],
+      "id": "351839e8-4b42-4256-9833-96668d51ad9d",
+      "name": "sender id"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "prompt for gemini": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "sender id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "flag mechanisms": {
+      "main": [
+        [
+          {
+            "node": "prepare data for sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepare data for sheets": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "flag mechanisms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "prompt for gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "sender id": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e241ffb0-8b76-4ac6-b57b-9a9a5eee61e8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b991ca42b5827bfb566cb929703aa44c3245d6345ed48ef6e078f1fc513268b0"
+  },
+  "id": "vogNGzIOLSB7rOjL",
+  "tags": []
+}
