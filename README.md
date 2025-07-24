@@ -11,7 +11,6 @@ This n8n workflow automates the process of providing accessible, general health 
 -   **Conversational AI (Google Gemini):** Understands user queries related to health, weakness, and nutrition, and generates personalized, non-diagnostic advice and recipes.
 -   **Multi-Channel Communication:**
     -   **Telegram Integration:** Receives user messages via a Telegram bot and sends AI responses directly back.
-    -   **(Optional) Twilio Integration:** Can be configured to also receive and send messages via SMS/WhatsApp for broader accessibility.
 -   **Automated Logging (Google Sheets):** All interactions (user query, AI response, sender ID, timestamp) are automatically logged for monitoring, review, and analytics.
 -   **Emergency Flagging:** Critically, if the AI's response suggests a serious medical concern (e.g., "seek immediate medical attention," "dial 108"), the interaction is automatically flagged in the logs for potential human follow-up.
 -   **Localized Recipe Suggestions:** AI is prompted to suggest recipes using common Indian ingredients, focusing on seasonal and regional applicability.
@@ -37,7 +36,6 @@ To use this workflow, set up the following credentials in your n8n instance:
 -   ✅ **Telegram Bot Token** — to connect to your Telegram bot.
 -   ✅ **Google Gemini API** — for generative AI capabilities.
 -   ✅ **Google Sheets OAuth2** — to log interactions in a Google Sheet.
--   **(Optional)** ✅ **Twilio Account** — to handle SMS/WhatsApp communication.
 
 > 🛡️ Credentials are referenced by ID in the workflow. You’ll need to reassign them after importing this workflow.
 
